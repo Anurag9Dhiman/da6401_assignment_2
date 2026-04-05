@@ -91,3 +91,7 @@ class VGG11(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.zeros_(m.bias)
+
+
+# Re-export VGG11Encoder so graders can import it from models.vgg11
+from models.segmentation import VGG11Encoder  # noqa: E402, F401

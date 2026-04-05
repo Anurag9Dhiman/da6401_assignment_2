@@ -89,6 +89,11 @@ class MultiTaskPerceptionModel(nn.Module):
         d = self.up1(d, e1)
         seg_logits = self.seg_head(d)
 
+        if seg_logits.shape[2:] != x.shape[2:]:
+            seg_logits = torch.nn.functional.interpolate(
+                seg_logits, size=x.shape[2:], mode="bilinear", align_corners=False
+            )
+
         return {
             "classification": cls_logits,
             "localization": bbox_coords,
