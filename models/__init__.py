@@ -6,12 +6,13 @@ Import from this package in training/inference scripts to keep paths stable.
 from .layers import CustomDropout
 from .localization import VGG11Localizer
 from .classification import VGG11Classifier
-from .segmentation import VGG11UNet
-from .vgg11 import VGG11Encoder
+from .segmentation import VGG11UNet, VGG11Encoder
+from .vgg11 import VGG11
 from .multitask import MultiTaskPerceptionModel
 
 __all__ = [
     "CustomDropout",
+    "VGG11",
     "VGG11Classifier",
     "VGG11Encoder",
     "VGG11Localizer",

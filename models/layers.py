@@ -1,4 +1,4 @@
-"""Reusable custom layers 
+"""Reusable custom layers
 """
 
 import torch
@@ -10,8 +10,17 @@ class CustomDropout(nn.Module):
     """
 
     def __init__(self, p: float = 0.5):
-        pass
+        super().__init__()
+        if not (0.0 <= p < 1.0):
+            raise ValueError(f"Dropout probability must be in [0,1), got {p}")
+        self.p = p
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: implement dropout.
-        raise NotImplementedError("Implement CustomDropout.forward")
+        if not self.training or self.p == 0.0:
+            return x
+        keep_prob = 1.0 - self.p
+        mask = torch.bernoulli(torch.full_like(x, keep_prob))
+        return x * mask / keep_prob
+
+    def extra_repr(self) -> str:
+        return f"p={self.p}"

@@ -1,11 +1,29 @@
-# DA6401 Assignment-2 Skeleton Guide
+# DA6401 Assignment 2 — Visual Perception Pipeline on Oxford-IIIT Pet
 
-This repository is an instructional skeleton for building the complete visual perception pipeline on Oxford-IIIT Pet.
+## Links
+- **GitHub Repo:** https://github.com/Anurag9Dhiman/da6401_assignment_2
+- **W&B Report:** (link to be added)
 
-## Contact
+## Tasks
+1. **Classification** — VGG11-based breed classifier (37 classes)
+2. **Localization** — Bounding box regression using IoU loss
+3. **Segmentation** — U-Net style encoder-decoder for trimap segmentation
+4. **Multi-task** — Unified model with shared VGG11 backbone for all 3 tasks
 
-For questions or issues, please contact the teaching staff or post on the course forum.
+## Setup
+```bash
+pip install -r requirements.txt
+```
 
----
+## Training
+```bash
+python train.py --task cls
+python train.py --task loc
+python train.py --task seg
+python train.py --task multi
+```
 
-Good luck with your implementation!
+## Inference
+```bash
+python inference.py --image <path_to_image> --checkpoint checkpoints/multitask.pth
+```
