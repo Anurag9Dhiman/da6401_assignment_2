@@ -15,13 +15,6 @@ class MultiTaskPerceptionModel(nn.Module):
                  dropout_p: float = 0.5, pretrained_vgg=None):
         super().__init__()
 
-        classifier_path = "checkpoints/classifier.pth"
-        localizer_path  = "checkpoints/localizer.pth"
-        unet_path       = "checkpoints/unet.pth"
-        gdown.download(id="1El_SmZBM-K-gr_pyIVL0mO5NTc7X-FTt", output=classifier_path, quiet=False)
-        gdown.download(id="1d0-p1Ld7IkQkWkqp-n7lZuFT2tCWBPA_", output=localizer_path,  quiet=False)
-        gdown.download(id="1_YX4arh42XNghcIVsu3jxZpyaXIE2nSY", output=unet_path,       quiet=False)
-
         # encoder being shared
         self.encoder = VGG11Encoder(pretrained_vgg)
         self.avgpool1 = nn.AdaptiveAvgPool2d((7, 7))
@@ -60,6 +53,51 @@ class MultiTaskPerceptionModel(nn.Module):
         self.seg_head = nn.Conv2d(64, seg_classes, kernel_size=1)
 
         self._init_heads()
+        self._load_pretrained_weights()
+
+    def _load_pretrained_weights(self):
+        import os
+        os.makedirs("checkpoints", exist_ok=True)
+
+        classifier_path = "checkpoints/classifier.pth"
+        localizer_path  = "checkpoints/localizer.pth"
+        unet_path       = "checkpoints/unet.pth"
+
+        if not os.path.exists(classifier_path):
+            gdown.download(id="1El_SmZBM-K-gr_pyIVL0mO5NTc7X-FTt", output=classifier_path, quiet=False)
+        if not os.path.exists(localizer_path):
+            gdown.download(id="1d0-p1Ld7IkQkWkqp-n7lZuFT2tCWBPA_", output=localizer_path,  quiet=False)
+        if not os.path.exists(unet_path):
+            gdown.download(id="1_YX4arh42XNghcIVsu3jxZpyaXIE2nSY", output=unet_path,       quiet=False)
+
+        # Load encoder + decoder from unet checkpoint
+        unet_sd = torch.load(unet_path, map_location="cpu")["state_dict"]
+        self.load_state_dict(
+            {k: v for k, v in unet_sd.items()
+             if k.startswith(("encoder.", "bottleneck.", "up", "seg_head."))},
+            strict=False
+        )
+
+        # Load cls_head from classifier checkpoint
+        # backbone.classifier.0 -> cls_head.1, .3 -> .4, .6 -> .7
+        cls_sd = torch.load(classifier_path, map_location="cpu")["state_dict"]
+        cls_remap = {"0": "1", "3": "4", "6": "7"}
+        cls_head_sd = {}
+        for k, v in cls_sd.items():
+            if k.startswith("backbone.classifier."):
+                parts = k.split(".")  # ["backbone","classifier","idx","param"]
+                new_idx = cls_remap.get(parts[2], parts[2])
+                cls_head_sd[f"cls_head.{new_idx}.{'.'.join(parts[3:])}"] = v
+        self.load_state_dict(cls_head_sd, strict=False)
+
+        # Load bbox_head from localizer checkpoint
+        # regression_head.* -> bbox_head.*
+        loc_sd = torch.load(localizer_path, map_location="cpu")["state_dict"]
+        bbox_head_sd = {
+            k.replace("regression_head.", "bbox_head."): v
+            for k, v in loc_sd.items() if k.startswith("regression_head.")
+        }
+        self.load_state_dict(bbox_head_sd, strict=False)
 
     def _init_heads(self):
         for m in list(self.cls_head.modules()) + list(self.bbox_head.modules()):
