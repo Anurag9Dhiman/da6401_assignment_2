@@ -58,7 +58,7 @@ def evaluate(args):
     loaders, _ = get_dataloader(args.data_root, batch_size=1, num_workers=2)
     model = VGG11Localizer().to(device)
     ckpt = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(ckpt["model_state"])
+    model.load_state_dict(ckpt.get("state_dict", ckpt.get("model_state", ckpt)))
     model.eval()
 
     wandb.init(project=args.wandb_project, name="eval_loc_table", job_type="evaluation")

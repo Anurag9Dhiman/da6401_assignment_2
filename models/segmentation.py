@@ -103,4 +103,9 @@ class VGG11UNet(nn.Module):
         d = self.up3(d, e3)
         d = self.up2(d, e2)
         d = self.up1(d, e1)
-        return self.seg_head(d)
+        seg = self.seg_head(d)
+        if seg.shape[2:] != x.shape[2:]:
+            seg = torch.nn.functional.interpolate(
+                seg, size=x.shape[2:], mode="bilinear", align_corners=False
+            )
+        return seg

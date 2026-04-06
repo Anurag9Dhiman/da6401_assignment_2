@@ -37,12 +37,13 @@ def get_device():
 def _load_pretrained_vgg(path: str):
     vgg = VGG11Classifier(num_classes=37)
     ckpt = torch.load(path, map_location="cpu")
-    vgg.load_state_dict(ckpt["model_state"])
+    sd = ckpt.get("state_dict", ckpt.get("model_state", ckpt))
+    vgg.load_state_dict(sd)
     return vgg
 
 def save_checkpoint(model, path, **kwargs):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model_state": model.state_dict(), **kwargs}, path)
+    torch.save({"state_dict": model.state_dict(), **kwargs}, path)
 
 # Implementation for loss helper functions
 
