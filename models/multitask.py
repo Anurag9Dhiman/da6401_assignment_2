@@ -70,34 +70,48 @@ class MultiTaskPerceptionModel(nn.Module):
         if not os.path.exists(unet_path):
             gdown.download(id="1_YX4arh42XNghcIVsu3jxZpyaXIE2nSY", output=unet_path,       quiet=False)
 
-        # Load encoder + decoder from unet checkpoint
-        unet_sd = torch.load(unet_path, map_location="cpu")["state_dict"]
-        self.load_state_dict(
-            {k: v for k, v in unet_sd.items()
-             if k.startswith(("encoder.", "bottleneck.", "up", "seg_head."))},
-            strict=False
-        )
+        cls_sd  = torch.load(classifier_path, map_location="cpu")["state_dict"]
+        loc_sd  = torch.load(localizer_path,  map_location="cpu")["state_dict"]
+        unet_sd = torch.load(unet_path,       map_location="cpu")["state_dict"]
 
-        # Load cls_head from classifier checkpoint
-        # backbone.classifier.0 -> cls_head.1, .3 -> .4, .6 -> .7
-        cls_sd = torch.load(classifier_path, map_location="cpu")["state_dict"]
-        cls_remap = {"0": "1", "3": "4", "6": "7"}
-        cls_head_sd = {}
+        # Map backbone.features.N -> encoder.blockX.Y
+        # VGG11 with BN: pool layers at indices 3,7,14,21,28
+        # block1=[0-3], block2=[4-7], block3=[8-14], block4=[15-21], block5=[22-28]
+        feat_to_block = {
+            "0": "block1.0", "1": "block1.1",
+            "4": "block2.0", "5": "block2.1",
+            "8": "block3.0", "9": "block3.1",
+            "11": "block3.3", "12": "block3.4",
+            "15": "block4.0", "16": "block4.1",
+            "18": "block4.3", "19": "block4.4",
+            "22": "block5.0", "23": "block5.1",
+            "25": "block5.3", "26": "block5.4",
+        }
+
+        new_sd = {}
         for k, v in cls_sd.items():
-            if k.startswith("backbone.classifier."):
-                parts = k.split(".")  # ["backbone","classifier","idx","param"]
-                new_idx = cls_remap.get(parts[2], parts[2])
-                cls_head_sd[f"cls_head.{new_idx}.{'.'.join(parts[3:])}"] = v
-        self.load_state_dict(cls_head_sd, strict=False)
+            if k.startswith("backbone.features."):
+                parts = k.split(".")  # [backbone, features, idx, param]
+                block_key = feat_to_block.get(parts[2])
+                if block_key:
+                    new_sd[f"encoder.{block_key}.{'.'.join(parts[3:])}"] = v
+            elif k.startswith("backbone.classifier."):
+                parts = k.split(".")
+                remap = {"0": "1", "3": "4", "6": "7"}
+                new_idx = remap.get(parts[2], parts[2])
+                new_sd[f"cls_head.{new_idx}.{'.'.join(parts[3:])}"] = v
+
+        # Load decoder from unet checkpoint
+        for k, v in unet_sd.items():
+            if k.startswith(("bottleneck.", "up", "seg_head.")):
+                new_sd[k] = v
 
         # Load bbox_head from localizer checkpoint
-        # regression_head.* -> bbox_head.*
-        loc_sd = torch.load(localizer_path, map_location="cpu")["state_dict"]
-        bbox_head_sd = {
-            k.replace("regression_head.", "bbox_head."): v
-            for k, v in loc_sd.items() if k.startswith("regression_head.")
-        }
-        self.load_state_dict(bbox_head_sd, strict=False)
+        for k, v in loc_sd.items():
+            if k.startswith("regression_head."):
+                new_sd[k.replace("regression_head.", "bbox_head.")] = v
+
+        self.load_state_dict(new_sd, strict=False)
 
     def _init_heads(self):
         for m in list(self.cls_head.modules()) + list(self.bbox_head.modules()):
