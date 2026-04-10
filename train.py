@@ -125,8 +125,12 @@ class DiceLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         probs = torch.softmax(logits, dim=1)
+        # Mask out ignored pixels (-1) before one-hot encoding
+        valid = (targets >= 0)
+        tgt_clamped = targets.clamp(min=0)
         tgt_oh = torch.zeros_like(probs)
-        tgt_oh.scatter_(1, targets.unsqueeze(1), 1)
+        tgt_oh.scatter_(1, tgt_clamped.unsqueeze(1), 1)
+        tgt_oh = tgt_oh * valid.unsqueeze(1).float()
         dims = (0, 2, 3)
         inter = (probs * tgt_oh).sum(dim=dims)
         denom = (probs + tgt_oh).sum(dim=dims)

@@ -262,8 +262,13 @@ class OxfordIIITPetDataset(Dataset):
         bbox_t = torch.tensor(
             out["bboxes"][0] if out["bboxes"] else bbox_raw,
             dtype=torch.float32,
-        )
-        mask_t = torch.as_tensor(out["mask"], dtype=torch.long) - 1  # 0-indexed
+        ).clamp(0.0, 1.0)
+
+        # Oxford trimaps: 1=fg, 2=bg, 3=boundary → subtract 1 → 0,1,2
+        # Clamp to [-1, 2]: -1 is ignored by CE loss; anything outside [1,3]
+        # in the raw mask (e.g. 0 from padding) maps to -1 (ignored).
+        mask_t = torch.as_tensor(out["mask"], dtype=torch.long) - 1
+        mask_t = mask_t.clamp(-1, 2)
 
         return {
             "image": out["image"],
