@@ -18,6 +18,9 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+from packaging.version import Version as _V
+
+_ALBU_NEW_API = _V(A.__version__) >= _V("1.4.0")
 
 # Helpers downloading step
 
@@ -62,6 +65,22 @@ _MEAN = (0.485, 0.456, 0.406)
 _STD  = (0.229, 0.224, 0.225)
 
 
+def _coarse_dropout(p: float = 0.2) -> A.BasicTransform:
+    """Return CoarseDropout compatible with albumentations 1.x and 2.x."""
+    if _ALBU_NEW_API:
+        return A.CoarseDropout(
+            num_holes_range=(1, 4),
+            hole_height_range=(16, 32),
+            hole_width_range=(16, 32),
+            fill=0, p=p,
+        )
+    return A.CoarseDropout(
+        max_holes=4, max_height=32, max_width=32,
+        min_holes=1, min_height=16, min_width=16,
+        fill_value=0, p=p,
+    )
+
+
 def get_transform(split: str, image_size: int = 224) -> A.Compose:
     if split == "train":
         return A.Compose(
@@ -76,12 +95,7 @@ def get_transform(split: str, image_size: int = 224) -> A.Compose:
                 ),
                 A.Rotate(limit=15, p=0.4),
                 A.GaussianBlur(blur_limit=(3, 5), p=0.2),
-                A.CoarseDropout(
-                    num_holes_range=(1, 4),
-                    hole_height_range=(16, 32),
-                    hole_width_range=(16, 32),
-                    fill=0, p=0.2,
-                ),
+                _coarse_dropout(p=0.2),
                 A.Normalize(mean=_MEAN, std=_STD),
                 ToTensorV2(),
             ],

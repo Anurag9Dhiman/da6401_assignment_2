@@ -109,6 +109,11 @@ def _use_amp(device: torch.device) -> bool:
     return device.type == "cuda"
 
 
+def _autocast_dtype(device: torch.device) -> str:
+    """Return a device_type string safe for torch.autocast ('cuda' or 'cpu')."""
+    return "cuda" if device.type == "cuda" else "cpu"
+
+
 # ──────────────────────────────────────────────
 # Loss helpers
 # ──────────────────────────────────────────────
@@ -219,7 +224,7 @@ def train_cls(args):
             labels = batch["label"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type=device.type, enabled=use_amp):
+            with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                 loss = criterion(model(images), labels)
 
             scaler.scale(loss).backward()
@@ -237,7 +242,7 @@ def train_cls(args):
             for batch in loaders["val"]:
                 images = batch["image"].to(device, non_blocking=True)
                 labels = batch["label"].to(device, non_blocking=True)
-                with torch.autocast(device_type=device.type, enabled=use_amp):
+                with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                     logits = model(images)
                 val_loss += criterion(logits, labels).item()
                 all_preds.extend(logits.argmax(1).cpu().tolist())
@@ -336,7 +341,7 @@ def train_loc(args):
             bboxes = batch["bbox"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type=device.type, enabled=use_amp):
+            with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                 loss = iou_crit(model(images), bboxes)
 
             scaler.scale(loss).backward()
@@ -354,7 +359,7 @@ def train_loc(args):
             for batch in loaders["val"]:
                 images = batch["image"].to(device, non_blocking=True)
                 bboxes = batch["bbox"].to(device, non_blocking=True)
-                with torch.autocast(device_type=device.type, enabled=use_amp):
+                with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                     val_iou += (1 - iou_crit(model(images), bboxes)).item()
 
         n_train = len(loaders["train"])
@@ -431,7 +436,7 @@ def train_seg(args):
             masks  = batch["mask"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type=device.type, enabled=use_amp):
+            with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                 logits = _resize_seg(model(images), masks)
                 loss   = criterion(logits, masks)
 
@@ -451,7 +456,7 @@ def train_seg(args):
             for i, batch in enumerate(loaders["val"]):
                 images = batch["image"].to(device, non_blocking=True)
                 masks  = batch["mask"].to(device, non_blocking=True)
-                with torch.autocast(device_type=device.type, enabled=use_amp):
+                with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                     logits = _resize_seg(model(images), masks)
                 val_loss += criterion(logits, masks).item()
                 val_dice += dice_score(logits, masks)
@@ -560,7 +565,7 @@ def train_multi(args):
             masks  = batch["mask"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type=device.type, enabled=use_amp):
+            with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                 out      = model(images)
                 seg_pred = _resize_seg(out["segmentation"], masks)
                 l_cls    = cls_crit(out["classification"], labels)
@@ -592,7 +597,7 @@ def train_multi(args):
                 bboxes = batch["bbox"].to(device, non_blocking=True)
                 masks  = batch["mask"].to(device, non_blocking=True)
 
-                with torch.autocast(device_type=device.type, enabled=use_amp):
+                with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
                     out      = model(images)
                     seg_pred = _resize_seg(out["segmentation"], masks)
                     l_cls    = cls_crit(out["classification"], labels)
