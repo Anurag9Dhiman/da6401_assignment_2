@@ -84,9 +84,24 @@ def _load_imagenet_weights(features_module: nn.Module):
 
 
 def _init_wandb(args, name: str):
-    """Initialise wandb; fall back to disabled mode when no API key is present."""
-    mode = "disabled" if (args.no_wandb or not os.environ.get("WANDB_API_KEY")) else "online"
-    wandb.init(project=args.wandb_project, name=name, config=vars(args), mode=mode)
+    """Initialise wandb. On Kaggle, pulls API key from Kaggle Secrets automatically."""
+    if args.no_wandb:
+        wandb.init(project=args.wandb_project, name=name, config=vars(args), mode="disabled")
+        return
+
+    # On Kaggle: try to pull the API key from Kaggle Secrets (add secret named WANDB_API_KEY)
+    if _is_kaggle() and not os.environ.get("WANDB_API_KEY"):
+        try:
+            from kaggle_secrets import UserSecretsClient
+            key = UserSecretsClient().get_secret("WANDB_API_KEY")
+            os.environ["WANDB_API_KEY"] = key
+            wandb.login(key=key, relogin=True)
+            print("[wandb] Logged in via Kaggle Secrets.")
+        except Exception as e:
+            print(f"[wandb] Kaggle Secrets login failed ({e}). Running wandb offline.")
+            os.environ["WANDB_MODE"] = "offline"
+
+    wandb.init(project=args.wandb_project, name=name, config=vars(args))
 
 
 def _use_amp(device: torch.device) -> bool:
