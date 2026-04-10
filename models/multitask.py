@@ -80,10 +80,30 @@ class MultiTaskPerceptionModel(nn.Module):
 
         new_sd = {}
 
-        # 1. Encoder: load directly from unet checkpoint (encoder.block* keys match)
-        for k, v in unet_sd.items():
-            if k.startswith("encoder."):
-                new_sd[k] = v
+        # backbone.features.N  →  encoder.blockB.M
+        # VGG11-BN layout (with BatchNorm): Conv,BN,ReLU,Pool per block
+        # Only Conv and BN have parameters (ReLU/Pool are skipped in state_dict)
+        _feat_to_block = {
+            0: ("block1", 0), 1: ("block1", 1),          # block1: Conv64, BN
+            4: ("block2", 0), 5: ("block2", 1),          # block2: Conv128, BN
+            8:  ("block3", 0), 9:  ("block3", 1),        # block3: Conv256, BN
+            11: ("block3", 3), 12: ("block3", 4),        #         Conv256, BN
+            15: ("block4", 0), 16: ("block4", 1),        # block4: Conv512, BN
+            18: ("block4", 3), 19: ("block4", 4),        #         Conv512, BN
+            22: ("block5", 0), 23: ("block5", 1),        # block5: Conv512, BN
+            25: ("block5", 3), 26: ("block5", 4),        #         Conv512, BN
+        }
+
+        # 1. Encoder: remap backbone.features.* from classifier.pth
+        #    This keeps the encoder consistent with the cls_head weights.
+        for k, v in cls_sd.items():
+            if k.startswith("backbone.features."):
+                parts = k.split(".")  # [backbone, features, idx, param...]
+                feat_idx = int(parts[2])
+                if feat_idx in _feat_to_block:
+                    block_name, layer_idx = _feat_to_block[feat_idx]
+                    new_key = f"encoder.{block_name}.{layer_idx}.{'.'.join(parts[3:])}"
+                    new_sd[new_key] = v
 
         # 2. Segmentation decoder: load from unet checkpoint
         for k, v in unet_sd.items():
