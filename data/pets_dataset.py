@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 import urllib.request
 import ssl
 
-# Bypass SSL verification for macOS
+# Bypass SSL verification for macOS / restricted environments
 ssl._create_default_https_context = ssl._create_unverified_context
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -24,6 +24,24 @@ from albumentations.pytorch import ToTensorV2
 _IMAGES_URL = "https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz"
 _ANNOTS_URL = "https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz"
 
+# Kaggle dataset path (oxford-iiit-pet dataset on Kaggle)
+_KAGGLE_PETS_ROOT = "/kaggle/input/oxford-iiit-pet"
+
+
+def _is_kaggle() -> bool:
+    return Path("/kaggle/input").exists()
+
+
+def _resolve_root(root: str) -> Path:
+    """Auto-detect Kaggle environment and return correct data root."""
+    p = Path(root)
+    if p.exists():
+        return p
+    if _is_kaggle() and Path(_KAGGLE_PETS_ROOT).exists():
+        return Path(_KAGGLE_PETS_ROOT)
+    return p
+
+
 def maybe_download(root: str = "data/pets"):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -38,15 +56,33 @@ def maybe_download(root: str = "data/pets"):
             with tarfile.open(fname) as tf:
                 tf.extractall(root)
 
-# To transform image data
+
+# ImageNet normalisation constants
+_MEAN = (0.485, 0.456, 0.406)
+_STD  = (0.229, 0.224, 0.225)
+
+
 def get_transform(split: str, image_size: int = 224) -> A.Compose:
     if split == "train":
         return A.Compose(
             [
-                A.Resize(image_size, image_size),
+                A.RandomResizedCrop(
+                    height=image_size, width=image_size,
+                    scale=(0.7, 1.0), ratio=(0.75, 1.33), p=1.0,
+                ),
                 A.HorizontalFlip(p=0.5),
-                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
-                A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                A.ColorJitter(
+                    brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1, p=0.6
+                ),
+                A.Rotate(limit=15, p=0.4),
+                A.GaussianBlur(blur_limit=(3, 5), p=0.2),
+                A.CoarseDropout(
+                    num_holes_range=(1, 4),
+                    hole_height_range=(16, 32),
+                    hole_width_range=(16, 32),
+                    fill=0, p=0.2,
+                ),
+                A.Normalize(mean=_MEAN, std=_STD),
                 ToTensorV2(),
             ],
             bbox_params=A.BboxParams(format="yolo", label_fields=["bbox_labels"]),
@@ -54,22 +90,23 @@ def get_transform(split: str, image_size: int = 224) -> A.Compose:
     return A.Compose(
         [
             A.Resize(image_size, image_size),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+            A.Normalize(mean=_MEAN, std=_STD),
             ToTensorV2(),
         ],
         bbox_params=A.BboxParams(format="yolo", label_fields=["bbox_labels"]),
     )
 
+
 # The dataset class
 
 class OxfordIIITPetDataset(Dataset):
-    """Oxford-IIIT Pet multi-task dataset loader skeleton."""
+    """Oxford-IIIT Pet multi-task dataset loader.
 
-    """ Here, each sample will return a dict with corresponding keys:
+    Each sample returns a dict:
         'image': (3, H, W) float tensor - normalised
         'label' : int in [0, 36] - breed index
-        'bbox' : (4, ) float tensor - [x_c, y_c, w, h] in [0,1]
-        'mask' : (H, W) long tensor - 0=fg, 1=bg, 2= boundary
+        'bbox'  : (4,) float tensor - [x_c, y_c, w, h] in [0, 1]
+        'mask'  : (H, W) long tensor - 0=fg, 1=bg, 2=boundary
     """
 
     def __init__(
@@ -81,7 +118,7 @@ class OxfordIIITPetDataset(Dataset):
         val_fraction: float = 0.15,
         seed: int = 42,
     ):
-        self.root = Path(root)
+        self.root = _resolve_root(root)
         self.split = split
         self.img_dir = self.root / "images"
         self.annot_dir = self.root / "annotations"
@@ -93,28 +130,46 @@ class OxfordIIITPetDataset(Dataset):
         self._load_bboxes()
 
     def _parse_list(self, val_fraction: float, seed: int):
-        # here, we will parse annotation/list.txt first and then split into train/val/test.
         list_path = self.annot_dir / "list.txt"
-        seen: dict[str, int] = {}
-        class_names: list[str] = []
-        all_samples = []
+        name_to_classid: dict[str, int] = {}
+        classid_to_breed: dict[int, str] = {}
 
         with open(list_path) as f:
             for line in f:
                 if line.startswith('#'):
                     continue
                 parts = line.strip().split()
-                if len(parts) < 4:
+                if len(parts) < 2:
                     continue
-                name, split_id = parts[0], int(parts[3])
-                breeds = "_".join(name.split("_")[:-1])
-                if breeds not in seen:
-                    seen[breeds] = len(seen)
-                    class_names.append(breeds)
-                all_samples.append((name, seen[breeds], split_id))
+                name = parts[0]
+                class_id = int(parts[1]) - 1  # 0-indexed (parts[1] is CLASS-ID 1..37)
+                breed = "_".join(name.split("_")[:-1])
+                name_to_classid[name] = class_id
+                classid_to_breed[class_id] = breed
 
-        trainval = [s for s in all_samples if s[2] == 1]
-        test_set = [s for s in all_samples if s[2] == 2]
+        num_classes = max(classid_to_breed.keys()) + 1
+        class_names = [classid_to_breed.get(i, f"class_{i}") for i in range(num_classes)]
+
+        # Use official split files
+        trainval_path = self.annot_dir / "trainval.txt"
+        test_path     = self.annot_dir / "test.txt"
+
+        def _read_split_file(path):
+            names = []
+            with open(path) as f:
+                for line in f:
+                    if line.startswith('#'):
+                        continue
+                    parts = line.strip().split()
+                    if parts:
+                        names.append(parts[0])
+            return names
+
+        trainval_names = _read_split_file(trainval_path)
+        test_names     = _read_split_file(test_path)
+
+        trainval = [(n, name_to_classid[n], 1) for n in trainval_names if n in name_to_classid]
+        test_set = [(n, name_to_classid[n], 2) for n in test_names if n in name_to_classid]
 
         rng = np.random.default_rng(seed)
         idx = rng.permutation(len(trainval))
@@ -130,11 +185,9 @@ class OxfordIIITPetDataset(Dataset):
         return class_names, samples
 
     def _load_bboxes(self):
-        """To load the bound boxes from file annotations/xmls/."""
         xml_dir = self.annot_dir / "xmls"
         if not xml_dir.exists():
             return
-
         for name, _, _ in self.samples:
             xml_path = xml_dir / f"{name}.xml"
             if not xml_path.exists():
@@ -178,9 +231,11 @@ class OxfordIIITPetDataset(Dataset):
             bbox_labels=[label],
         )
 
-        bbox_t = torch.tensor(out["bboxes"][0] if out["bboxes"] else bbox_raw,
-                              dtype=torch.float32)
-        mask_t = torch.as_tensor(out["mask"], dtype=torch.long) - 1  # indexing is 0 indexed
+        bbox_t = torch.tensor(
+            out["bboxes"][0] if out["bboxes"] else bbox_raw,
+            dtype=torch.float32,
+        )
+        mask_t = torch.as_tensor(out["mask"], dtype=torch.long) - 1  # 0-indexed
 
         return {
             "image": out["image"],
@@ -190,20 +245,22 @@ class OxfordIIITPetDataset(Dataset):
         }
 
 
-# settings for DataLoader
 def get_dataloader(
     root: str = "data/pets",
     batch_size: int = 32,
     image_size: int = 224,
-    num_workers: int = 4,
+    num_workers: int = 2,
     val_fraction: float = 0.15,
     seed: int = 42,
+    persistent_workers: bool = True,
 ) -> tuple[dict, list[str]]:
     datasets = {
         split: OxfordIIITPetDataset(root, split, image_size=image_size,
                                     val_fraction=val_fraction, seed=seed)
         for split in ("train", "val", "test")
     }
+    # persistent_workers only makes sense when num_workers > 0
+    _persistent = persistent_workers and num_workers > 0
     loaders = {
         split: DataLoader(
             ds,
@@ -212,6 +269,7 @@ def get_dataloader(
             num_workers=num_workers,
             pin_memory=True,
             drop_last=(split == "train"),
+            persistent_workers=_persistent,
         )
         for split, ds in datasets.items()
     }
