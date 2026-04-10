@@ -20,28 +20,37 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from packaging.version import Version as _V
 
-_ALBU_NEW_API = _V(A.__version__) >= _V("1.4.0")
+_ALBU_V2 = _V(A.__version__) >= _V("2.0.0")   # size= API for crops
+_ALBU_NEW_API = _V(A.__version__) >= _V("1.4.0")  # new CoarseDropout API
 
 # Helpers downloading step
 
 _IMAGES_URL = "https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz"
 _ANNOTS_URL = "https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz"
 
-# Kaggle dataset path (oxford-iiit-pet dataset on Kaggle)
-_KAGGLE_PETS_ROOT = "/kaggle/input/oxford-iiit-pet"
-
-
 def _is_kaggle() -> bool:
     return Path("/kaggle/input").exists()
 
 
+# Candidate Kaggle dataset paths (checked in order)
+_KAGGLE_CANDIDATES = [
+    "/kaggle/input/the-oxfordiiit-pet-dataset",   # tanlikesmath dataset
+    "/kaggle/input/oxford-iiit-pet",
+    "/kaggle/input/oxfordiiit-pet-dataset",
+]
+
+
 def _resolve_root(root: str) -> Path:
-    """Auto-detect Kaggle environment and return correct data root."""
+    """Return correct data root; auto-detects Kaggle dataset paths."""
     p = Path(root)
     if p.exists():
         return p
-    if _is_kaggle() and Path(_KAGGLE_PETS_ROOT).exists():
-        return Path(_KAGGLE_PETS_ROOT)
+    if _is_kaggle():
+        for candidate in _KAGGLE_CANDIDATES:
+            cp = Path(candidate)
+            if cp.exists() and (cp / "images").exists():
+                print(f"[dataset] Auto-detected Kaggle path: {cp}")
+                return cp
     return p
 
 
@@ -81,14 +90,19 @@ def _coarse_dropout(p: float = 0.2) -> A.BasicTransform:
     )
 
 
+def _random_resized_crop(image_size: int) -> A.BasicTransform:
+    """Return RandomResizedCrop compatible with albumentations 1.x and 2.x."""
+    kwargs = dict(scale=(0.7, 1.0), ratio=(0.75, 1.33), p=1.0)
+    if _ALBU_V2:
+        return A.RandomResizedCrop(size=(image_size, image_size), **kwargs)
+    return A.RandomResizedCrop(height=image_size, width=image_size, **kwargs)
+
+
 def get_transform(split: str, image_size: int = 224) -> A.Compose:
     if split == "train":
         return A.Compose(
             [
-                A.RandomResizedCrop(
-                    height=image_size, width=image_size,
-                    scale=(0.7, 1.0), ratio=(0.75, 1.33), p=1.0,
-                ),
+                _random_resized_crop(image_size),
                 A.HorizontalFlip(p=0.5),
                 A.ColorJitter(
                     brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1, p=0.6
