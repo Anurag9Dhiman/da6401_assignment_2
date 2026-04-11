@@ -12,7 +12,7 @@ class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""
 
     def __init__(self, num_breeds: int = 37, seg_classes: int = 3, in_channels: int = 3,
-                 dropout_p: float = 0.5, pretrained_vgg=None):
+                 dropout_p: float = 0.5, pretrained_vgg=None, load_pretrained: bool = True):
         super().__init__()
 
         # encoder being shared
@@ -53,7 +53,10 @@ class MultiTaskPerceptionModel(nn.Module):
         self.seg_head = nn.Conv2d(64, seg_classes, kernel_size=1)
 
         self._init_heads()
-        self._load_pretrained_weights()
+        # Only load pretrained Drive checkpoints during inference/evaluation,
+        # not during training (pretrained_vgg or imagenet init is used instead)
+        if load_pretrained:
+            self._load_pretrained_weights()
 
     def _load_pretrained_weights(self):
         import os

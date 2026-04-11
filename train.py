@@ -542,7 +542,38 @@ def train_multi(args):
         num_breeds=37, seg_classes=3,
         dropout_p=args.dropout_p,
         pretrained_vgg=pretrained_vgg,
+        load_pretrained=False,  # skip Drive download during training
     ).to(device)
+
+    if args.pretrained_imagenet and pretrained_vgg is None:
+        # Load ImageNet weights into shared encoder blocks
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+        try:
+            from torchvision.models import vgg11_bn, VGG11_BN_Weights
+            tv = vgg11_bn(weights=VGG11_BN_Weights.IMAGENET1K_V1)
+        except Exception:
+            from torchvision.models import vgg11_bn
+            tv = vgg11_bn(pretrained=True)
+        # Rebuild flat features → encoder.blockN mapping
+        _feat_to_block = {
+            0: ("block1", 0), 1: ("block1", 1),
+            4: ("block2", 0), 5: ("block2", 1),
+            8:  ("block3", 0), 9:  ("block3", 1),
+            11: ("block3", 3), 12: ("block3", 4),
+            15: ("block4", 0), 16: ("block4", 1),
+            18: ("block4", 3), 19: ("block4", 4),
+            22: ("block5", 0), 23: ("block5", 1),
+            25: ("block5", 3), 26: ("block5", 4),
+        }
+        enc_sd = {}
+        for k, v in tv.features.state_dict().items():
+            idx = int(k.split(".")[0])
+            if idx in _feat_to_block:
+                block, layer = _feat_to_block[idx]
+                enc_sd[f"{block}.{layer}.{'.'.join(k.split('.')[1:])}"] = v
+        model.encoder.load_state_dict(enc_sd, strict=False)
+        print("[pretrained] Loaded ImageNet weights into shared encoder.")
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
