@@ -67,11 +67,11 @@ class MultiTaskPerceptionModel(nn.Module):
         unet_path       = "checkpoints/unet.pth"
 
         if not os.path.exists(classifier_path):
-            gdown.download(id="1DtOl1_YPpT78FfsqYIIlnZRErPKI4ork", output=classifier_path, quiet=False)
+            gdown.download(id="1SD4Gax-A5n37KD7PvlmQ4s8KVRX70_ym", output=classifier_path, quiet=False)
         if not os.path.exists(localizer_path):
-            gdown.download(id="1HIORR5pldwt-2jn539yz-8NRy4RWiTzn", output=localizer_path,  quiet=False)
+            gdown.download(id="1UTCx3rRkOBx4cYBJtI4pdExtYx9iNUOZ", output=localizer_path,  quiet=False)
         if not os.path.exists(unet_path):
-            gdown.download(id="1wuCUJ4cwdsKq7qjHuCS-HcegGTI3Wj55", output=unet_path,        quiet=False)
+            gdown.download(id="1x3NhNvpZvMmagm9r4HuD4kV_lf1gxCIS", output=unet_path,        quiet=False)
 
         def _get_sd(path):
             ck = torch.load(path, map_location="cpu")
