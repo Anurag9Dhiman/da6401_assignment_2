@@ -296,6 +296,20 @@ def train_cls(args):
 # Task 2 — Localization
 # ──────────────────────────────────────────────
 
+def _iou_per_sample(pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """Per-sample IoU for [B, 4] boxes in (cx, cy, w, h) format."""
+    px1 = pred[:, 0] - pred[:, 2] / 2;  py1 = pred[:, 1] - pred[:, 3] / 2
+    px2 = pred[:, 0] + pred[:, 2] / 2;  py2 = pred[:, 1] + pred[:, 3] / 2
+    tx1 = target[:, 0] - target[:, 2] / 2;  ty1 = target[:, 1] - target[:, 3] / 2
+    tx2 = target[:, 0] + target[:, 2] / 2;  ty2 = target[:, 1] + target[:, 3] / 2
+    ix1 = torch.max(px1, tx1);  iy1 = torch.max(py1, ty1)
+    ix2 = torch.min(px2, tx2);  iy2 = torch.min(py2, ty2)
+    inter = (ix2 - ix1).clamp(0) * (iy2 - iy1).clamp(0)
+    pa = (px2 - px1).clamp(0) * (py2 - py1).clamp(0)
+    ta = (tx2 - tx1).clamp(0) * (ty2 - ty1).clamp(0)
+    return inter / (pa + ta - inter + eps)
+
+
 def train_loc(args):
     loaders, _ = get_dataloader(
         args.data_root, args.batch_size, args.image_size, args.num_workers
@@ -332,8 +346,8 @@ def train_loc(args):
 
     _init_wandb(args, f"loc_{args.run_name}")
 
-    best_val_iou = 0.0
-    no_improve   = 0
+    best_acc50 = 0.0
+    no_improve = 0
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
@@ -346,7 +360,9 @@ def train_loc(args):
             optimizer.zero_grad(set_to_none=True)
 
             with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
-                loss = iou_crit(model(images), bboxes)
+                pred = model(images)
+                # IoU loss + SmoothL1 auxiliary (stabilises early-training gradients)
+                loss = iou_crit(pred, bboxes) + 0.1 * nn.functional.smooth_l1_loss(pred, bboxes)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -357,32 +373,41 @@ def train_loc(args):
 
         scheduler.step()
 
+        # Validation: compute per-sample IoU → Acc@0.5 and Acc@0.75 (matches grader)
         model.eval()
-        val_iou = 0.0
+        all_ious = []
         with torch.no_grad():
             for batch in loaders["val"]:
                 images = batch["image"].to(device, non_blocking=True)
                 bboxes = batch["bbox"].to(device, non_blocking=True)
                 with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
-                    val_iou += (1 - iou_crit(model(images), bboxes)).item()
+                    pred = model(images)
+                all_ious.append(_iou_per_sample(pred.float(), bboxes.float()).cpu())
+
+        all_ious = torch.cat(all_ious)
+        acc50    = (all_ious >= 0.50).float().mean().item()
+        acc75    = (all_ious >= 0.75).float().mean().item()
+        mean_iou = all_ious.mean().item()
 
         n_train = len(loaders["train"])
-        n_val   = len(loaders["val"])
         elapsed = time.time() - t0
 
         wandb.log({
-            "epoch":      epoch,
-            "train/loss": total_loss / n_train,
-            "val/iou":    val_iou   / n_val,
+            "epoch":        epoch,
+            "train/loss":   total_loss / n_train,
+            "val/mean_iou": mean_iou,
+            "val/acc@0.5":  acc50,
+            "val/acc@0.75": acc75,
             "epoch_time_s": elapsed,
         })
         print(f"[Loc] Epoch {epoch:3d} | loss={total_loss/n_train:.4f}"
-              f" | val_iou={val_iou/n_val:.4f} | {elapsed:.1f}s")
+              f" | mIoU={mean_iou:.4f} | Acc@0.5={acc50:.4f} | Acc@0.75={acc75:.4f} | {elapsed:.1f}s")
 
-        if val_iou / n_val > best_val_iou:
-            best_val_iou = val_iou / n_val
-            no_improve   = 0
-            save_checkpoint(model, "localization.pth", epoch=epoch, iou=best_val_iou)
+        if acc50 > best_acc50:
+            best_acc50 = acc50
+            no_improve = 0
+            save_checkpoint(model, "localization.pth", epoch=epoch, acc50=acc50, acc75=acc75)
+            print(f"[Loc] ** best Acc@0.5={acc50:.4f} saved **")
         else:
             no_improve += 1
 
