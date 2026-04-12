@@ -1,11 +1,13 @@
-#Custom IoU loss
+"""Custom IoU loss
+"""
 
 
 import torch
 import torch.nn as nn
 
 class IoULoss(nn.Module):
-    # This is iou  loss use for bounding box regression
+    """IoU loss for bounding box regression."""
+
 
     def __init__(self, eps: float = 1e-6, reduction: str = "mean"):
         super().__init__()
@@ -15,7 +17,8 @@ class IoULoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, pred_boxes: torch.Tensor, target_boxes: torch.Tensor) -> torch.Tensor:
-        #Lets compute iou loss between prediction and target bounding boxes.
+        """Compute IoU loss between predicted and target bounding boxes.
+
         Args:
             pred_boxes: [B, 4] predicted boxes in (x_center, y_center, width, height) format.
             target_boxes: [B, 4] target boxes in (x_center, y_center, width, height) format."""
