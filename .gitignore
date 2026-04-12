@@ -12,3 +12,4 @@ showcase.py
 evaluate_loc.py
 extract_checkpoints.py
 verify_mt_bridge.py
+return_all_experiments.sh
