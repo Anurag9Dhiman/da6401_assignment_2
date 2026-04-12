@@ -2,7 +2,7 @@
 
 ## Links
 - **GitHub Repo:** https://github.com/Anurag9Dhiman/da6401_assignment_2
-- **W&B Report:** (link to be added)
+- **W&B Report:** https://api.wandb.ai/links/anuragdhiman666-indian-institute-of-technology-madras/u3mxoxv7
 
 ## Tasks
 1. **Classification** — VGG11-based breed classifier (37 classes)
