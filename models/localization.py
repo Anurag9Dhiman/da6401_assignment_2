@@ -24,7 +24,7 @@ class VGG11Localizer(nn.Module):
             for param in self.encoder.parameters():
                 param.requires_grad = False
 
-        # Regression head will output (x_c, y_c, w, h)
+        # Regression head will output (x_c, y_c, w, h) in pixel space [0, image_size]
         self.regression_head = nn.Sequential(
             nn.Flatten(),
             nn.Linear(512 * 7 * 7, 1024),
@@ -33,7 +33,6 @@ class VGG11Localizer(nn.Module):
             nn.Linear(1024, 256),
             nn.ReLU(inplace=True),
             nn.Linear(256, 4),
-            nn.Sigmoid(),  # restrict output in [0,1]
         )
         self._init_head()
 

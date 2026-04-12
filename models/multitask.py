@@ -146,7 +146,8 @@ class MultiTaskPerceptionModel(nn.Module):
 
         pooled = self.avgpool1(e5)
         cls_logits = self.cls_head(pooled)
-        bbox_coords = self.bbox_head(pooled)
+        # bbox_head outputs [cx, cy, w, h] in [0,1]; scale to pixel space [0, 224]
+        bbox_coords = self.bbox_head(pooled) * 224
 
         d = self.bottleneck(e5)
         d = self.up5(d, e5)

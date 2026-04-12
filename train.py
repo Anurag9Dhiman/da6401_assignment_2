@@ -360,13 +360,20 @@ def train_loc(args):
 
         for batch in loaders["train"]:
             images = batch["image"].to(device, non_blocking=True)
-            bboxes = batch["bbox"].to(device, non_blocking=True)
+            bboxes = batch["bbox"].to(device, non_blocking=True) * args.image_size  # scale to pixel space
+
+            # Filter out samples with NaN bboxes (missing XML annotations)
+            valid = ~torch.isnan(bboxes).any(dim=1)
+            if valid.sum() == 0:
+                continue
+            images, bboxes = images[valid], bboxes[valid]
+
             optimizer.zero_grad(set_to_none=True)
 
             with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
-                pred = model(images)
-                # IoU loss + SmoothL1 auxiliary (stabilises early-training gradients)
-                loss = iou_crit(pred, bboxes) + 0.1 * nn.functional.smooth_l1_loss(pred, bboxes)
+                pred = model(images).clamp(0, args.image_size)
+                # GIoU loss + 0.5 * SmoothL1 for precise box regression
+                loss = iou_crit(pred, bboxes) + 0.5 * nn.functional.smooth_l1_loss(pred, bboxes)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -383,9 +390,9 @@ def train_loc(args):
         with torch.no_grad():
             for batch in loaders["val"]:
                 images = batch["image"].to(device, non_blocking=True)
-                bboxes = batch["bbox"].to(device, non_blocking=True)
+                bboxes = batch["bbox"].to(device, non_blocking=True) * args.image_size
                 with torch.autocast(device_type=_autocast_dtype(device), enabled=use_amp):
-                    pred = model(images)
+                    pred = model(images).clamp(0, args.image_size)
                 all_ious.append(_iou_per_sample(pred.float(), bboxes.float()).cpu())
 
         all_ious = torch.cat(all_ious)
