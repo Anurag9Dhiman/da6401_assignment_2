@@ -352,12 +352,10 @@ def train_loc(args):
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         model.train()
-        # Keep frozen encoder's BN in eval mode so running stats don't drift
-        # from the classifier.pth values used at MultiTask inference time
+        # Strict Freeze: Keep the encoder in eval mode so BatchNorm running stats
+        # and Dropout behavior remain identical to the classification task.
         if args.freeze_encoder == "full":
-            for m in model.encoder.modules():
-                if isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
-                    m.eval()
+            model.encoder.eval()
         total_loss = 0.0
 
         for batch in loaders["train"]:
